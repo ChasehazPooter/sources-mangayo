@@ -1,0 +1,222 @@
+const mangayomiSources = [
+  {
+    name: "MadaraDex HTML",
+    lang: "en",
+    baseUrl: "https://madaradex.org",
+    apiUrl: "",
+    iconUrl: "https://www.google.com/s2/favicons?sz=128&domain=https://madaradex.org",
+    typeSource: "single",
+    itemType: 0,
+    version: "0.0.3",
+    isNsfw: true,
+    hasCloudflare: true,
+    pkgPath: "madaradex.js",
+  },
+];
+
+class DefaultExtension extends MProvider {
+  constructor() {
+    super();
+    this.client = new Client();
+  }
+
+  getBaseUrl() {
+    return (this.source.baseUrl || "https://madaradex.org").replace(/\/$/, "");
+  }
+
+  getHeaders() {
+    return {
+      Referer: this.getBaseUrl() + "/",
+      Origin: this.getBaseUrl(),
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    };
+  }
+
+  absUrl(href) {
+    if (!href) return "";
+    if (href.startsWith("http")) return href;
+    if (href.startsWith("//")) return "https:" + href;
+    return this.getBaseUrl() + (href.startsWith("/") ? href : "/" + href);
+  }
+
+  imgOf(el) {
+    if (!el) return "";
+    return (
+      el.attr("data-src") ||
+      el.attr("data-lazy-src") ||
+      el.attr("data-cfsrc") ||
+      (el.attr("srcset") || "").split(" ")[0] ||
+      el.attr("src") ||
+      ""
+    );
+  }
+
+  isBlocked(body) {
+    const t = (body || "").toLowerCase();
+    return (
+      t.includes("just a moment") ||
+      t.includes("cf-challenge") ||
+      t.includes("rickroll") ||
+      t.includes("never gonna give you up")
+    );
+  }
+
+  async get(url) {
+    const res = await this.client.get(url, this.getHeaders());
+    if (this.isBlocked(res.body)) {
+      throw new Error("Blocked page (Cloudflare / anti-bot). Open WebView, pass the check, then retry.");
+    }
+    return res;
+  }
+
+  parseList(body) {
+    const doc = new Document(body);
+    const list = [];
+    const seen = {};
+    const cards = doc.select(".page-item-detail, .manga__item, .item-thumb, .page-listing-item .item-thumb, article");
+    for (const card of cards) {
+      const a =
+        card.selectFirst(".post-title a") ||
+        card.selectFirst(".item-summary a") ||
+        card.selectFirst("h3 a") ||
+        card.selectFirst("h2 a") ||
+        card.selectFirst("a");
+      if (!a) continue;
+      const link = this.absUrl(a.attr("href"));
+      if (!link.includes("/title/")) continue;
+      if (link.includes("/chapter-")) continue;
+      if (seen[link]) continue;
+      seen[link] = true;
+      const name = (a.text || "").trim();
+      const imageUrl = this.absUrl(this.imgOf(card.selectFirst("img")));
+      if (name && link) list.push({ name, imageUrl, link });
+    }
+    const hasNextPage = !!(
+      doc.selectFirst("a.next") ||
+      doc.selectFirst("a[rel=next]") ||
+      doc.selectFirst(".pagination .next")
+    );
+    return { list, hasNextPage };
+  }
+
+  async getPopular(page) {
+    const url =
+      page === 1
+        ? `${this.getBaseUrl()}/title/?m_orderby=views`
+        : `${this.getBaseUrl()}/title/page/${page}/?m_orderby=views`;
+    const res = await this.get(url);
+    return this.parseList(res.body);
+  }
+
+  get supportsLatest() {
+    return true;
+  }
+
+  async getLatestUpdates(page) {
+    const url =
+      page === 1
+        ? `${this.getBaseUrl()}/title/?m_orderby=latest`
+        : `${this.getBaseUrl()}/title/page/${page}/?m_orderby=latest`;
+    const res = await this.get(url);
+    return this.parseList(res.body);
+  }
+
+  async search(query, page, _filters) {
+    const q = encodeURIComponent(query);
+    const url = `${this.getBaseUrl()}/?s=${q}&post_type=wp-manga`;
+    const res = await this.get(url);
+    const parsed = this.parseList(res.body);
+    parsed.hasNextPage = false;
+    return parsed;
+  }
+
+  async getDetail(url) {
+    const full = this.absUrl(url);
+    const res = await this.get(full);
+    const doc = new Document(res.body);
+
+    const title =
+      (doc.selectFirst("h1") && doc.selectFirst("h1").text.trim()) ||
+      (doc.selectFirst(".post-title") && doc.selectFirst(".post-title").text.trim()) ||
+      "";
+    const imageUrl = this.absUrl(
+      this.imgOf(doc.selectFirst(".summary_image img") || doc.selectFirst(".tab-summary img") || doc.selectFirst("img"))
+    );
+    const description = (
+      (doc.selectFirst(".description-summary") && doc.selectFirst(".description-summary").text) ||
+      (doc.selectFirst(".summary__content") && doc.selectFirst(".summary__content").text) ||
+      ""
+    ).trim();
+    const author = (
+      (doc.selectFirst(".author-content") && doc.selectFirst(".author-content").text) ||
+      ""
+    ).trim();
+    const statusText = (
+      (doc.selectFirst(".post-status") && doc.selectFirst(".post-status").text) ||
+      ""
+    ).toLowerCase();
+    let status = 5;
+    if (statusText.includes("ongoing")) status = 0;
+    else if (statusText.includes("complete")) status = 1;
+    else if (statusText.includes("hiatus")) status = 2;
+    else if (statusText.includes("cancel")) status = 3;
+
+    const genre = [];
+    const genreEls = doc.select(".genres-content a");
+    for (const g of genreEls) {
+      const t = (g.text || "").trim();
+      if (t) genre.push(t);
+    }
+
+    const chapters = [];
+    const seen = {};
+    const items = doc.select("li.wp-manga-chapter a, .listing-chapters_wrap a, a");
+    for (const a of items) {
+      const href = this.absUrl(a.attr("href"));
+      if (!href.includes("/chapter-")) continue;
+      if (seen[href]) continue;
+      seen[href] = true;
+      const name = (a.text || "").trim();
+      if (!name) continue;
+      chapters.push({ name, url: href });
+    }
+
+    if (!chapters.length) {
+      throw new Error("No chapters found in HTML. Site is still blocking the app request.");
+    }
+
+    return { title, imageUrl, description, author, genre, status, chapters };
+  }
+
+  async getPageList(url) {
+    const full = this.absUrl(url);
+    const res = await this.get(full);
+    const doc = new Document(res.body);
+    const pages = [];
+    const imgs =
+      doc.select("div.page-break img").length
+        ? doc.select("div.page-break img")
+        : doc.select(".reading-content img").length
+          ? doc.select(".reading-content img")
+          : doc.select("img.wp-manga-chapter-img");
+
+    for (const img of imgs) {
+      const src = this.absUrl(this.imgOf(img));
+      if (!src) continue;
+      if (src.includes("logo") || src.includes("favicon") || src.includes("pixel")) continue;
+      pages.push({ url: src, headers: this.getHeaders() });
+    }
+
+    if (!pages.length) {
+      throw new Error("No chapter images found. The reader page is blocked or uses a different layout.");
+    }
+    return pages;
+  }
+
+  getFilterList() {
+    return [];
+  }
+}
