@@ -7,7 +7,7 @@ const mangayomiSources = [
     iconUrl: "https://www.google.com/s2/favicons?sz=128&domain=https://madaradex.org",
     typeSource: "single",
     itemType: 0,
-    version: "0.0.3",
+    version: "0.0.4",
     isNsfw: true,
     hasCloudflare: true,
     pkgPath: "madaradex.js",
@@ -44,14 +44,23 @@ class DefaultExtension extends MProvider {
 
   imgOf(el) {
     if (!el) return "";
-    return (
+    const raw =
       el.attr("data-src") ||
       el.attr("data-lazy-src") ||
       el.attr("data-cfsrc") ||
       (el.attr("srcset") || "").split(" ")[0] ||
       el.attr("src") ||
-      ""
-    );
+      "";
+    return (raw || "").trim();
+  }
+
+  imageHeaders() {
+    return {
+      Referer: this.getBaseUrl() + "/",
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    };
   }
 
   isBlocked(body) {
@@ -196,18 +205,22 @@ class DefaultExtension extends MProvider {
     const res = await this.get(full);
     const doc = new Document(res.body);
     const pages = [];
-    const imgs =
-      doc.select("div.page-break img").length
-        ? doc.select("div.page-break img")
-        : doc.select(".reading-content img").length
-          ? doc.select(".reading-content img")
-          : doc.select("img.wp-manga-chapter-img");
+    let imgs = doc.select("img.wp-manga-chapter-img");
+    if (!imgs.length) imgs = doc.select("div.page-break img");
+    if (!imgs.length) imgs = doc.select(".reading-content img");
 
     for (const img of imgs) {
       const src = this.absUrl(this.imgOf(img));
       if (!src) continue;
-      if (src.includes("logo") || src.includes("favicon") || src.includes("pixel")) continue;
-      pages.push({ url: src, headers: this.getHeaders() });
+      if (
+        src.includes("logo") ||
+        src.includes("favicon") ||
+        src.includes("pixel") ||
+        src.includes("dflazy") ||
+        src.endsWith(".svg")
+      )
+        continue;
+      pages.push({ url: src, headers: this.imageHeaders() });
     }
 
     if (!pages.length) {
