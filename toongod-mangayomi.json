@@ -1,0 +1,24 @@
+[
+  {
+    "name": "ToonGod",
+    "id": 847291056,
+    "baseUrl": "https://www.toongod.org",
+    "lang": "en",
+    "typeSource": "madara",
+    "iconUrl": "https://www.toongod.org/favicon.ico",
+    "dateFormat": "MMMM dd, yyyy",
+    "dateFormatLocale": "en_us",
+    "isNsfw": true,
+    "hasCloudflare": true,
+    "sourceCodeUrl": "https://raw.githubusercontent.com/kodjodevf/mangayomi-extensions/main/dart/manga/multisrc/madara/madara.dart",
+    "apiUrl": "",
+    "version": "0.0.1",
+    "isManga": true,
+    "itemType": 0,
+    "isFullData": false,
+    "appMinVerReq": "0.5.0",
+    "additionalParams": "",
+    "sourceCodeLanguage": 0,
+    "notes": "Unofficial manhwa site. Mixed 18+ titles. Cloudflare may block requests."
+  }
+]
